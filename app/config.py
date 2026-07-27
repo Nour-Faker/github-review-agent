@@ -13,3 +13,5 @@ class AppSettings:
     MAX_LINES: int = 500
 
 settings = AppSettings()
+# test Sprint 3
+DEBUG = True
