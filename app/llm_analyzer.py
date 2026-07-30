@@ -12,25 +12,19 @@ class AnalysisResult:
     is_valid: bool
 
 class LLMAnalyzer:
-    """
-    LLMAnalyzer — diagramme Classes.
-    NF-6  — Analyse du code par le LLM
-    NF-13 — Dépassement de la limite de tokens du LLM
-    """
+    """LLMAnalyzer — NF-6 + NF-13."""
 
     def __init__(self):
         self.client = AzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_KEY,
-            api_version="2025-03-01-preview"  # ← change ici
+            api_version="2025-03-01-preview"
         )
         self.deployment = settings.AZURE_OPENAI_DEPLOYMENT
         self.limiter = RateLimiter()
+
     def analyze_hunk(self, hunk: DiffHunk) -> AnalysisResult:
-        """
-        NF-6 — Analyse un hunk de code via le LLM.
-        Correspond à analyze_hunk(hunk: DiffHunk) dans le diagramme Classes.
-        """
+        """NF-6 — Analyse un hunk via le LLM."""
         prompt = f"""Tu es un expert en revue de code.
 Analyse ce bloc de code modifié et identifie :
 - Les bugs potentiels
@@ -45,9 +39,7 @@ Modifications :
 Réponds en français, de façon concise et professionnelle."""
 
         try:
-            # NF-13 — Retry si dépassement tokens
             return self._call_with_retry(prompt)
-
         except Exception as e:
             print(f"[LLMAnalyzer] Erreur analyse {hunk.file}: {e}")
             return AnalysisResult(
@@ -56,17 +48,12 @@ Réponds en français, de façon concise et professionnelle."""
             )
 
     def _call_with_retry(self, prompt: str, max_retries: int = 3) -> AnalysisResult:
-        """NF-13 — Gestion dépassement limite tokens avec retry."""
+        """NF-13 — Retry avec backoff exponentiel."""
         for attempt in range(max_retries):
             try:
                 response = self.client.responses.create(
                     model=self.deployment,
-                    input=[
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
+                    input=[{"role": "user", "content": prompt}],
                     instructions="Tu es un expert en revue de code.",
                     max_output_tokens=1000
                 )
@@ -75,7 +62,6 @@ Réponds en français, de façon concise et professionnelle."""
 
             except Exception as e:
                 error = str(e)
-                print(f"[DEBUG] Erreur: {error}")
                 if "rate_limit" in error or "tokens" in error:
                     print(f"[LLMAnalyzer] Rate limit — retry {attempt+1}/{max_retries}")
                     self.limiter.check_and_wait_retry()
@@ -89,17 +75,14 @@ Réponds en français, de façon concise et professionnelle."""
         )
 
     def analyze(self, context: str) -> str:
-        """
-        Analyse un contexte général — diagramme Classes.
-        Utilisé pour les mentions @ai-reviewer.
-        """
+        """Analyse un contexte général — NF-9."""
         try:
-            response = self.client.chat.completions.create(
+            response = self.client.responses.create(
                 model=self.deployment,
-                messages=[{"role": "user", "content": context}],
-                max_tokens=500,
-                temperature=0.2
+                input=[{"role": "user", "content": context}],
+                instructions="Tu es un expert en revue de code.",
+                max_output_tokens=500
             )
-            return response.choices[0].message.content
+            return response.output_text
         except Exception as e:
             return f"Erreur analyse : {str(e)}"
