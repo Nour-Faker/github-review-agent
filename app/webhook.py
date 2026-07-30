@@ -50,9 +50,8 @@ class WebhookHandler:
                 pr_number = payload["pull_request"]["number"]
                 repo = payload["repository"]["full_name"]
                 commit_sha = payload["pull_request"]["head"]["sha"]
-                asyncio.create_task(
-                    self.process_pr(repo, pr_number, commit_sha)
-                )
+                print(f"[PR #{pr_number}] Début traitement — {repo}")
+                await self.process_pr(repo, pr_number, commit_sha)  # ← await direct
 
         # NF-9 — Gestion des commandes textuelles (@ai-reviewer)
         elif event == "issue_comment":
