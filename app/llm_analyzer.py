@@ -19,15 +19,13 @@ class LLMAnalyzer:
     """
 
     def __init__(self):
-        # Connexion Azure OpenAI
         self.client = AzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_KEY,
-            api_version="2024-02-01"
+            api_version="2025-03-01-preview"  # ← change ici
         )
         self.deployment = settings.AZURE_OPENAI_DEPLOYMENT
         self.limiter = RateLimiter()
-
     def analyze_hunk(self, hunk: DiffHunk) -> AnalysisResult:
         """
         NF-6 — Analyse un hunk de code via le LLM.
@@ -58,37 +56,30 @@ Réponds en français, de façon concise et professionnelle."""
             )
 
     def _call_with_retry(self, prompt: str, max_retries: int = 3) -> AnalysisResult:
-        """
-        NF-13 — Gestion dépassement limite tokens avec retry.
-        Correspond à check_and_wait_retry() dans RateLimiter.
-        """
+        """NF-13 — Gestion dépassement limite tokens avec retry."""
         for attempt in range(max_retries):
             try:
-                response = self.client.chat.completions.create(
+                response = self.client.responses.create(
                     model=self.deployment,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Tu es un expert en revue de code."
-                        },
+                    input=[
                         {
                             "role": "user",
                             "content": prompt
                         }
                     ],
-                    max_tokens=1000,
-                    temperature=0.2
+                    instructions="Tu es un expert en revue de code.",
+                    max_output_tokens=1000
                 )
-                comment = response.choices[0].message.content
+                comment = response.output_text
                 return AnalysisResult(comment=comment, is_valid=True)
 
             except Exception as e:
                 error = str(e)
-                # NF-13 — Dépassement limite tokens ou rate limit
+                print(f"[DEBUG] Erreur: {error}")
                 if "rate_limit" in error or "tokens" in error:
                     print(f"[LLMAnalyzer] Rate limit — retry {attempt+1}/{max_retries}")
                     self.limiter.check_and_wait_retry()
-                    time.sleep(2 ** attempt)  # Backoff exponentiel
+                    time.sleep(2 ** attempt * 5)
                 else:
                     raise e
 

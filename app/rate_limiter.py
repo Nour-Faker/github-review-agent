@@ -27,4 +27,4 @@ class RateLimiter:
     def check_and_wait_retry(self) -> None:
         """Attend avant de retry si quota LLM dépassé — NF-13."""
         print("[RateLimiter] Attente avant retry LLM...")
-        time.sleep(2)
+        time.sleep(10)
