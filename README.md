@@ -255,5 +255,4 @@ GitHub : [@Nour-Faker](https://github.com/Nour-Faker)
 ---
 
 *© 2026 Smartovate LTD — Agent IA de Revue de Code — Tous droits réservés*
-HEREDOC
-echo "Done"
+
