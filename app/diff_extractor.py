@@ -12,7 +12,7 @@ class DiffHunk:
 class DiffExtractor:
     """DiffExtractor — NF-5."""
 
-    MAX_LINES = 500
+    MAX_LINES = 1000
 
     def __init__(self):
         self.token = os.getenv("GITHUB_TOKEN")
