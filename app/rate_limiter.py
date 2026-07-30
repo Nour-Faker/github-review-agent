@@ -5,11 +5,9 @@ class RateLimiter:
     """RateLimiter — diagramme Classes."""
 
     def __init__(self):
-        # Dictionnaire : sender -> liste des timestamps
         self.requests = defaultdict(list)
-        # Maximum 10 requêtes par heure par sender
-        self.max_requests = 10
-        self.window = 3600  # 1 heure en secondes
+        self.max_requests = 100  # ← change 10 par 100
+        self.window = 3600
 
     def check_quota(self, sender: str) -> bool:
         """Vérifie si le sender n'a pas dépassé son quota."""
