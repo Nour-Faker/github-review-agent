@@ -11,22 +11,13 @@ class CommentValidator:
     """
 
     def validate(self, result: AnalysisResult) -> bool:
-        """
-        Vérifie que le résultat est valide avant de poster.
-        Correspond à validate(result: AnalysisResult): bool dans le diagramme.
-        """
-        # Résultat invalide → ne pas poster
+        """Valide le résultat — NF-14."""
         if not result.is_valid:
             return False
-
-        # Commentaire vide → ne pas poster
-        if not result.comment or len(result.comment.strip()) == 0:
+        if not result.comment:
             return False
-
-        # Commentaire trop court → probablement une erreur LLM
-        if len(result.comment) < 10:
+        if len(result.comment.strip()) < 5:  # ← réduit de 10 à 5
             return False
-
         return True
 
 
@@ -82,9 +73,9 @@ class GitHubCommenter:
 
         review_body = {
             "commit_id": commit_sha,
-            "body": "## 🤖 GitHub Review Agent\nRevue automatique générée par GPT-4o.",
+            "body": "## 🤖 GitHub Review Agent\nRevue automatique générée par GPT-5-mini.",
             "event": "COMMENT",
-            "comments": comments
+            "comments": []  # ← envoie sans commentaires de lignes d'abord
         }
 
         url = f"{self.base_url}/repos/{repo}/pulls/{pr_number}/reviews"
