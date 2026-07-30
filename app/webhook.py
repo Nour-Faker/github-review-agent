@@ -59,11 +59,7 @@ class WebhookHandler:
             await self.handle_mention_comment(payload)
 
     async def handle_mention_comment(self, payload: dict) -> None:
-        """
-        NF-9 — Gestion des commandes textuelles.
-        Écoute les mentions @ai-reviewer dans les commentaires de PR.
-        Correspond à handle_mention_comment() dans le diagramme Classes.
-        """
+        """NF-9 — Gestion des commandes textuelles."""
         from app.commenter import GitHubCommenter
         from app.llm_analyzer import LLMAnalyzer
 
@@ -71,35 +67,32 @@ class WebhookHandler:
         repo = payload.get("repository", {}).get("full_name", "")
         pr_number = payload.get("issue", {}).get("number", 0)
 
-        # NF-9 — Vérifier si l'agent est mentionné
+        print(f"[NF-9] Event reçu — comment: '{comment_body[:50]}' repo: {repo} pr: {pr_number}")
+
         if "@ai-reviewer" not in comment_body:
+            print(f"[NF-9] Pas de mention @ai-reviewer — ignoré")
             return
 
-        # NF-15 — Vérifier que ce n'est pas le bot qui se répond
         if self.is_bot_sender(payload):
+            print(f"[NF-9] Bot détecté — ignoré")
             return
 
-        print(f"[NF-9] Mention @ai-reviewer détectée sur PR #{pr_number}")
+        print(f"[NF-9] Mention détectée — traitement PR #{pr_number}")
 
-        # Extraire la question après @ai-reviewer
         question = comment_body.replace("@ai-reviewer", "").strip()
-
-        # Analyser avec le LLM
         analyzer = LLMAnalyzer()
-        context = f"""Un développeur pose cette question sur la PR #{pr_number} :
-{question}
-
-Réponds de façon concise et professionnelle en français."""
-
+        context = f"Question sur PR #{pr_number} : {question}\nRéponds en français."
         response = analyzer.analyze(context)
 
-        # Poster la réponse
+        print(f"[NF-9] Réponse LLM générée — {len(response)} caractères")
+
         commenter = GitHubCommenter()
         await commenter.post_single_comment(
             body=f"🤖 **@ai-reviewer**\n\n{response}",
             pr_id=str(pr_number),
             repo=repo
         )
+        print(f"[NF-9] Commentaire posté sur PR #{pr_number}")
 
     async def process_pr(
         self,
@@ -167,7 +160,10 @@ async def github_webhook(request: Request):
     body = await verify_signature(request, settings.WEBHOOK_SECRET)
     payload = json.loads(body)
     event = request.headers.get("X-GitHub-Event", "")
-
-    asyncio.create_task(handler.handle_webhook(payload, event))
+    
+    print(f"[Webhook] Event reçu: {event}")
+    
+    # Appel direct au lieu de create_task
+    await handler.handle_webhook(payload, event)
 
     return JSONResponse(status_code=202, content={"status": "accepted"})
