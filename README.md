@@ -7,20 +7,20 @@
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python)](https://python.org)
 [![Azure](https://img.shields.io/badge/Azure-Container%20Apps-0078D4?style=flat&logo=microsoft-azure)](https://azure.microsoft.com)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=flat&logo=docker)](https://docker.com)
-[![GPT-5-mini](https://img.shields.io/badge/LLM-GPT--5--mini-412991?style=flat&logo=openai)](https://openai.com)
+[![GPT-4o-mini](https://img.shields.io/badge/LLM-GPT--4o--mini-412991?style=flat&logo=openai)](https://openai.com)
 
 ---
 
 ## 📋 Description
 
-GitHub Review Agent est un agent IA déployé en production sur **Azure Container Apps** qui analyse automatiquement les Pull Requests GitHub et publie des commentaires de revue de code générés par **GPT-5-mini (Azure OpenAI)**.
+GitHub Review Agent est un agent IA déployé en production sur **Azure Container Apps** qui analyse automatiquement les Pull Requests GitHub et publie des commentaires de revue de code générés par **GPT-4o-mini (Azure OpenAI)**.
 
 Quand un développeur ouvre ou met à jour une PR, l'agent :
 
 1. 📥 Reçoit l'événement via **webhook GitHub** (HTTPS sécurisé)
 2. 🔐 Vérifie l'authenticité de la requête (**HMAC-SHA256**)
 3. 📊 Extrait les modifications de code (**diff par fichier**)
-4. 🧠 Envoie le code à **GPT-5-mini** pour analyse
+4. 🧠 Envoie le code à **GPT-4o-mini** pour analyse
 5. 💬 Publie un **commentaire de revue** directement sur la PR
 
 ---
@@ -42,6 +42,11 @@ GET /health → {"status": "ok"}
 GET /docs
 ```
 
+**Dashboard React (local) :**
+```
+http://localhost:3000
+```
+
 ---
 
 ## 🏗️ Architecture
@@ -55,16 +60,18 @@ FastAPI Server (Azure Container Apps)
       ↓
 ┌─────────────────────────────────────┐
 │  1. verify_signature() — HMAC-SHA256 │
-│  2. is_bot_sender() — NF-15          │
-│  3. check_quota() — NF-12            │
-│  4. fetch_diff() — GitHub API        │
-│  5. is_oversized() — NF-13           │
-│  6. parse_hunks() — DiffExtractor    │
-│  7. analyze_hunk() — LLMAnalyzer     │
-│  8. post_review() — GitHubCommenter  │
+│  2. is_bot_sender()   — NF-15        │
+│  3. check_quota()     — NF-12        │
+│  4. fetch_diff()      — GitHub API   │
+│  5. is_oversized()    — NF-13        │
+│  6. parse_hunks()     — DiffExtractor│
+│  7. analyze_hunk()    — LLMAnalyzer  │
+│  8. post_review()     — GitHubComment│
 └─────────────────────────────────────┘
       ↓
-GitHub PR Comment (GPT-5-mini Analysis)
+GitHub PR Comment (GPT-4o-mini Analysis)
+      ↓
+React Dashboard (Monitoring & Metrics)
 ```
 
 ---
@@ -75,7 +82,7 @@ GitHub PR Comment (GPT-5-mini Analysis)
 github-review-agent/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py            # Point d'entrée FastAPI
+│   ├── main.py            # Point d'entrée FastAPI + endpoints API
 │   ├── config.py          # AppSettings — variables d'environnement
 │   ├── security.py        # Vérification HMAC-SHA256
 │   ├── webhook.py         # WebhookHandler — orchestration principale
@@ -83,6 +90,13 @@ github-review-agent/
 │   ├── rate_limiter.py    # NF-12/13 — Rate limiting + retry LLM
 │   ├── llm_analyzer.py    # NF-6 — Analyse code via Azure OpenAI
 │   └── commenter.py       # NF-8 — Publication commentaires GitHub
+├── github-review-dashboard/   # Frontend React
+│   ├── src/
+│   │   └── App.js         # Dashboard de monitoring
+│   └── package.json
+├── tests/
+│   ├── test_vulnerable.py # PR de test — vulnérabilités intentionnelles
+│   └── clean_code.py      # PR de test — code sans vulnérabilités
 ├── Dockerfile             # NF-11 — Conteneurisation
 ├── .dockerignore
 ├── .gitignore
@@ -100,7 +114,7 @@ github-review-agent/
 | GitHub App | NF-2 | App configurée avec webhooks et permissions PR |
 | FastAPI Server | NF-3 | Endpoint `/webhook` + vérification HMAC-SHA256 |
 | Extraction Diffs | NF-5 | Récupération et parsing du diff via GitHub API |
-| Analyse LLM | NF-6 | Analyse bugs/sécurité/mauvaises pratiques via GPT-5-mini |
+| Analyse LLM | NF-6 | Analyse bugs/sécurité/mauvaises pratiques via GPT-4o-mini |
 | Publication | NF-8 | Commentaires de revue automatiques sur la PR |
 | @ai-reviewer | NF-9 | Réponse aux mentions dans les commentaires |
 | Rate limiting | NF-12 | Limite de requêtes par sender (100/heure) |
@@ -108,6 +122,20 @@ github-review-agent/
 | Ligne invalide | NF-14 | CommentValidator avant chaque post |
 | Anti-boucle | NF-15 | Détection et ignore des événements bot |
 | Déploiement | NF-11 | Docker + Azure Container Registry + Container Apps |
+| Dashboard | NF-16 | Interface React de monitoring en temps réel |
+
+---
+
+## 🖥️ Dashboard React
+
+Interface de monitoring disponible sur `http://localhost:3000` avec :
+
+- **Métriques en temps réel** — PRs analysées, bugs détectés, taux de succès
+- **Repositories & Pull Requests** — liste live depuis l'API GitHub
+- **Trigger manuel** — déclenche une analyse sans passer par un webhook
+- **Historique des reviews** — toutes les analyses passées
+- **Analytics** — token usage Azure OpenAI, coût estimé, performance
+- **Thème Dark/Light** — toggle intégré
 
 ---
 
@@ -115,6 +143,7 @@ github-review-agent/
 
 ### Prérequis
 - Python 3.11+
+- Node.js 18+
 - Docker Desktop
 - Compte GitHub avec GitHub App configurée
 - Accès Azure OpenAI
@@ -125,37 +154,70 @@ git clone https://github.com/Nour-Faker/github-review-agent.git
 cd github-review-agent
 ```
 
-### 2. Environnement virtuel
+### 2. Backend — environnement virtuel
 ```bash
 python -m venv venv
 venv\Scripts\activate        # Windows
 source venv/bin/activate     # Linux/Mac
-```
-
-### 3. Dépendances
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Variables d'environnement
+### 3. Variables d'environnement
 Créer `.env` à la racine :
 ```env
 GITHUB_TOKEN=ghp_...
 GITHUB_WEBHOOK_SECRET=...
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_KEY=...
-AZURE_OPENAI_DEPLOYMENT=gpt-5-mini
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
 ```
 
-### 5. Lancer le serveur
+### 4. Lancer le backend
 ```bash
 uvicorn app.main:app --reload --port 8000
+```
+
+### 5. Lancer le dashboard React
+```bash
+cd github-review-dashboard
+npm install
+npm start
+# → http://localhost:3000
 ```
 
 ### 6. Tester le pipeline
 ```bash
 python test_agent.py
 ```
+
+---
+
+## 🧪 Tests
+
+### Test de sécurité — PR vulnérable
+```bash
+git checkout -b demo/security-test
+git add tests/test_vulnerable.py
+git commit -m "test: vulnerable code for agent demo"
+git push origin demo/security-test
+```
+→ L'agent détecte automatiquement : SQL Injection, Path Traversal, Hardcoded credentials, Division by zero, Debug mode.
+
+### Test de précision — Code propre
+```bash
+git checkout -b demo/clean-code
+git add tests/clean_code.py
+git commit -m "test: clean code with no vulnerabilities"
+git push origin demo/clean-code
+```
+→ L'agent répond : **"No critical issues found"**
+
+### Test @ai-reviewer
+Poste un commentaire sur n'importe quelle PR :
+```
+@ai-reviewer explique les risques de sécurité dans ce fichier
+```
+→ L'agent répond automatiquement en moins de 5 secondes.
 
 ---
 
@@ -189,7 +251,7 @@ Chaque webhook GitHub est vérifié cryptographiquement :
 - Requête rejetée HTTP 401 si signature invalide
 
 ### Secrets
-- Toutes les clés stockées dans Azure Container Apps Secrets
+- Toutes les clés stockées dans **Azure Container Apps Secrets**
 - Jamais de secrets dans le code source
 - `.env` exclu de Git via `.gitignore`
 
@@ -211,7 +273,7 @@ Développeur ouvre PR → Agent détecte taille → Message d'avertissement
 ### Mention @ai-reviewer
 ```
 Développeur commente "@ai-reviewer explique ce code"
-→ Agent répond automatiquement avec analyse GPT-5-mini
+→ Agent répond automatiquement avec analyse GPT-4o-mini
 ```
 
 ---
@@ -222,8 +284,8 @@ Développeur commente "@ai-reviewer explique ce code"
 |--------|---------|---------|--------|
 | Sprint 1 (S1-S2) | 1–14 Juil 2026 | NF-2, NF-3 | ✅ Terminé |
 | Sprint 2 (S3-S4) | 15–28 Juil 2026 | NF-5, NF-6, NF-13 | ✅ Terminé |
-| Sprint 3 (S5-S6) | 29 Juil–11 Août 2026 | NF-8, NF-9, NF-14, NF-15 | ✅ Terminé |
-| Sprint 4 (S7-S8) | 12–25 Août 2026 | NF-11, NF-12 | ✅ Terminé |
+| Sprint 3 (S5-S6) | 29 Juil–11 Août 2026 | NF-8, NF-9, NF-14, NF-15 | 🔄 En cours |
+| Sprint 4 (S7-S8) | 12–25 Août 2026 | NF-11, NF-12, NF-16 | 📅 Planifié |
 
 ---
 
@@ -231,13 +293,15 @@ Développeur commente "@ai-reviewer explique ce code"
 
 | Technologie | Version | Usage |
 |-------------|---------|-------|
-| Python | 3.11 | Langage principal |
+| Python | 3.11 | Langage principal backend |
 | FastAPI | 0.111+ | Serveur webhook REST |
 | Uvicorn | 0.29+ | Serveur ASGI production |
-| Azure OpenAI GPT-5-mini | 2025-08-07 | Analyse du code |
+| Azure OpenAI GPT-4o-mini | 2024-07-18 | Analyse du code |
 | Azure Container Apps | — | Hébergement production |
 | Azure Container Registry | Basic | Stockage images Docker |
 | Docker | — | Conteneurisation |
+| React | 18+ | Dashboard de monitoring |
+| Recharts | — | Graphes et analytics |
 | GitHub App | — | Webhooks + permissions PR |
 | GitHub API v3 | — | Fetch diff + post commentaires |
 | httpx | 0.28+ | Requêtes HTTP async |
@@ -254,6 +318,4 @@ GitHub : [@Nour-Faker](https://github.com/Nour-Faker)
 
 ---
 
-*© 2026 Smartovate LTD — Agent IA de Revue de Code — Tous droits réservés*
-HEREDOC
-echo "Done"
+*Smartovate LTD — Agent IA de Revue de Code — 2026
