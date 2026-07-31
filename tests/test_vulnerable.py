@@ -1,6 +1,4 @@
 # tests/test_vulnerable.py
-# Demo PR — intentional vulnerabilities to test the agent
-
 import os
 import sqlite3
 
@@ -24,5 +22,5 @@ def read_file(filename):
 def calculate_ratio(a, b):
     return a / b
 
-# VULN 5 — Debug mode hardcoded
+# VULN 5 — Debug mode
 DEBUG = True
