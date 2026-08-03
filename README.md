@@ -13,9 +13,10 @@
 
 ## 📸 Dashboard Preview
 
-| Dashboard | Reviews | Analytics | Settings |
-|-----------|---------|-----------|----------|
-| KPI cards, activity chart, PR list | Review history with bug detection | Token usage, weekly overview | Agent config, service status |
+![Dashboard](docs/dashboard.png)
+![Reviews](docs/reviews.png)
+![Analytics](docs/analytics.png)
+![Settings](docs/settings.png)
 
 > Live dashboard built with React + Recharts, connected to FastAPI backend deployed on Azure.
 
