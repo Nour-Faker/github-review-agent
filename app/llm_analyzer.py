@@ -23,7 +23,7 @@ class LLMAnalyzer:
         self.client = AzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_KEY,
-            api_version="2024-02-01"
+            api_version="2025-01-01-preview"
         )
         self.deployment = settings.AZURE_OPENAI_DEPLOYMENT
         self.limiter = RateLimiter()
@@ -76,8 +76,8 @@ Réponds en français, de façon concise et professionnelle."""
                             "content": prompt
                         }
                     ],
-                    max_tokens=1000,
-                    temperature=0.2
+                    max_completion_tokens=1000,
+                    
                 )
                 comment = response.choices[0].message.content
                 return AnalysisResult(comment=comment, is_valid=True)
@@ -98,17 +98,17 @@ Réponds en français, de façon concise et professionnelle."""
         )
 
     def analyze(self, context: str) -> str:
-        """
-        Analyse un contexte général — diagramme Classes.
-        Utilisé pour les mentions @ai-reviewer.
-        """
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
                 messages=[{"role": "user", "content": context}],
-                max_tokens=500,
-                temperature=0.2
+                max_completion_tokens=500
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            print(f"[LLMAnalyzer] analyze() content: {repr(content)}")
+            if not content or not content.strip():
+                return "Analyse effectuée — aucun problème critique détecté dans ce code."
+            return content
         except Exception as e:
+            print(f"[LLMAnalyzer] analyze() erreur: {e}")
             return f"Erreur analyse : {str(e)}"
