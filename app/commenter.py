@@ -3,6 +3,7 @@ from app.config import settings
 from app.llm_analyzer import AnalysisResult
 from app.diff_extractor import DiffHunk
 
+
 class CommentValidator:
     """
     CommentValidator — diagramme Classes.
@@ -11,22 +12,12 @@ class CommentValidator:
     """
 
     def validate(self, result: AnalysisResult) -> bool:
-        """
-        Vérifie que le résultat est valide avant de poster.
-        Correspond à validate(result: AnalysisResult): bool dans le diagramme.
-        """
-        # Résultat invalide → ne pas poster
         if not result.is_valid:
             return False
-
-        # Commentaire vide → ne pas poster
         if not result.comment or len(result.comment.strip()) == 0:
             return False
-
-        # Commentaire trop court → probablement une erreur LLM
         if len(result.comment) < 10:
             return False
-
         return True
 
 
@@ -54,52 +45,71 @@ class GitHubCommenter:
     ) -> None:
         """
         NF-8 — Publie une review complète sur la PR.
-        Correspond à post_review(results: List<AnalysisResult>): void
-        dans le diagramme Classes.
-        Étape 19 du diagramme Séquence.
+
+        CORRECTIF : on utilise hunk.position (calculée par DiffExtractor)
+        au lieu de position=1 hardcodé, pour que GitHub accepte les commentaires inline.
+        NF-14 — Si position invalide, fallback sur commentaire global.
         """
         comments = []
+        fallback_comments = []
 
         for hunk, result in results:
-            # NF-14 — validate() avant chaque commentaire
-            if self.validator.validate(result):
+            if not self.validator.validate(result):
+                print(f"[CommentValidator] Commentaire invalide sur {hunk.file} → ignoré")
+                continue
+
+            if hunk.position and hunk.position > 0:
+                # ✅ CORRECTIF — position réelle du hunk dans le diff
                 comments.append({
                     "path": hunk.file,
-                    "position": 1,
+                    "position": hunk.position,
                     "body": f"🤖 **AI Review — {hunk.file}**\n\n{result.comment}"
                 })
             else:
-                # NF-14 — ligne invalide → commentaire global
-                print(f"[CommentValidator] Commentaire invalide sur {hunk.file} → ignoré")
+                # NF-14 — position invalide → on garde pour commentaire global
+                fallback_comments.append(f"**{hunk.file}**\n{result.comment}")
 
-        if not comments:
+        # Poster la review inline si on a des commentaires valides
+        if comments:
+            review_body = {
+                "commit_id": commit_sha,
+                "body": "## 🤖 GitHub Review Agent\nRevue automatique générée par l'agent IA.",
+                "event": "COMMENT",
+                "comments": comments
+            }
+
+            url = f"{self.base_url}/repos/{repo}/pulls/{pr_number}/reviews"
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    headers=self.headers,
+                    json=review_body
+                )
+
+            if response.status_code in [200, 201]:
+                print(f"[GitHubCommenter] Review publiée — {len(comments)} commentaires inline")
+            else:
+                print(f"[GitHubCommenter] Erreur review {response.status_code}: {response.text}")
+                # Si la review inline échoue, on poste en fallback global
+                fallback_comments = [c["body"] for c in comments] + fallback_comments
+
+        # Poster les commentaires en fallback global (NF-14)
+        if fallback_comments:
+            body = "## 🤖 GitHub Review Agent\n\n" + "\n\n---\n\n".join(fallback_comments)
             await self.post_single_comment(
-                body="🤖 **GitHub Review Agent**\nAucun problème détecté dans cette PR.",
+                body=body,
                 pr_id=str(pr_number),
                 repo=repo
             )
-            return
 
-        review_body = {
-            "commit_id": commit_sha,
-            "body": "## 🤖 GitHub Review Agent\nRevue automatique générée par GPT-4o.",
-            "event": "COMMENT",
-            "comments": comments
-        }
-
-        url = f"{self.base_url}/repos/{repo}/pulls/{pr_number}/reviews"
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers=self.headers,
-                json=review_body
+        # Aucun commentaire du tout → PR propre
+        if not comments and not fallback_comments:
+            await self.post_single_comment(
+                body="🤖 **GitHub Review Agent**\n\n✅ Aucun problème détecté dans cette PR.",
+                pr_id=str(pr_number),
+                repo=repo
             )
-
-        if response.status_code in [200, 201]:
-            print(f"[GitHubCommenter] Review publiée — {len(comments)} commentaires")
-        else:
-            print(f"[GitHubCommenter] Erreur {response.status_code}: {response.text}")
 
     async def post_single_comment(
         self,
@@ -108,10 +118,8 @@ class GitHubCommenter:
         repo: str = ""
     ) -> None:
         """
-        Post un commentaire global sur la PR.
-        Correspond à post_single_comment(body: String, pr_id: String): void
-        dans le diagramme Classes.
-        Utilisé pour : oversized, erreurs, NF-9 mentions, NF-14 lignes invalides.
+        Post un commentaire global sur la PR (issue comment).
+        Utilisé pour : oversized, erreurs, NF-9 mentions, NF-14 fallback.
         """
         url = f"{self.base_url}/repos/{repo}/issues/{pr_id}/comments"
 
@@ -125,4 +133,4 @@ class GitHubCommenter:
         if response.status_code == 201:
             print(f"[GitHubCommenter] Commentaire global posté sur PR #{pr_id}")
         else:
-            print(f"[GitHubCommenter] Erreur {response.status_code}: {response.text}")
+            print(f"[GitHubCommenter] Erreur commentaire {response.status_code}: {response.text}")
