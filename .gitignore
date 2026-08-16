@@ -5,3 +5,5 @@ __pycache__/
 *.pem
 .DS_Store
 __pycache__/
+
+static/
