@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -7,15 +8,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 # Config
-SECRET_KEY = "smartovate-review-agent-secret-2026"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "smartovate-review-agent-secret-2026")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# Single admin user — upgrade to DB later
 USERS = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # "secret"
+    os.getenv("ADMIN_USERNAME", "admin"): {
+        "username": os.getenv("ADMIN_USERNAME", "admin"),
+        "hashed_password": os.getenv("ADMIN_PASSWORD_HASH", "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"),
         "role": "admin"
     }
 }

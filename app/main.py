@@ -1,18 +1,51 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from app.auth import Token, LoginRequest, USERS, verify_password, create_access_token
 from app.webhook import router
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from app.auth import Token, LoginRequest, USERS, verify_password, create_access_token, get_current_user
+from app.database import init_db, save_review, get_all_reviews, get_metrics as db_get_metrics
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import httpx
 import os
+import logging
+import json
+import pathlib
+
+# ── Logs JSON structurés ──────────────────────────────────────────────────────
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        return json.dumps({
+            "timestamp": self.formatTime(record),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        })
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(JSONFormatter())
+logging.root.setLevel(logging.INFO)
+logging.root.handlers = [_handler]
+logger = logging.getLogger("github_review_agent")
 
 load_dotenv()
 
+# ── Chemins ───────────────────────────────────────────────────────────────────
+BASE_DIR = pathlib.Path(__file__).parent.parent
+STATIC_DIR = BASE_DIR / "static"                 # build React
+
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="GitHub Review Agent", version="1.0.0")
 
-# ✅ CORRECTIF SÉCURITÉ — allow_origins="*" avec allow_credentials=True
-# est invalide (navigateurs bloquent) et dangereux en production.
-# Lister explicitement les origines autorisées.
+# Rate limiting (NF-19)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:3000,http://localhost:5173"
@@ -26,25 +59,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Startup ───────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+def startup():
+    try:
+        init_db()
+        logger.info("DB ready")
+    except Exception as e:
+        logger.error(f"DB startup failed: {e}")
+
+# ── Static files React (assets JS/CSS) ───────────────────────────────────────
+if STATIC_DIR.exists():
+    # Assets JS/CSS dans static/static/
+    assets_dir = STATIC_DIR / "static"
+    if assets_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(assets_dir)), name="static-assets")
+
+
+# ── Webhook router ────────────────────────────────────────────────────────────
 app.include_router(router)
 
-# Stockage en mémoire — à remplacer par une DB en production
+# ── Stockage temporaire ───────────────────────────────────────────────────────
 reviews_history = []
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+@app.get("/")
+def root():
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    return {"status": "ok", "api": "github-review-agent"}
+
+# React router fallback — toutes les routes inconnues servent index.html
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+    # Ne pas interférer avec les routes API et webhook
+    if full_path.startswith(("api/", "auth/", "webhook", "health", "docs", "openapi")):
+        raise HTTPException(status_code=404)
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    raise HTTPException(status_code=404)
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "version": "1.0", "model": "gpt-5-mini"}
+async def health():
+    result = {
+        "status": "ok",
+        "version": "1.0",
+        "model": os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini"),
+        "dependencies": {}
+    }
+    # Check DB
+    try:
+        db_get_metrics()
+        result["dependencies"]["database"] = "ok"
+    except Exception as e:
+        result["dependencies"]["database"] = f"error: {str(e)}"
+        result["status"] = "degraded"
+    # Check Azure OpenAI
+    try:
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            await client.get(azure_endpoint.rstrip("/") + "/")
+        result["dependencies"]["openai"] = "reachable"
+    except Exception:
+        result["dependencies"]["openai"] = "unreachable"
+    return result
 
 
 @app.post("/auth/login", response_model=Token)
 def login(request: LoginRequest):
     user = USERS.get(request.username)
     if not user or not verify_password(request.password, user["hashed_password"]):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
+        raise HTTPException(status_code=401, detail="Invalid username or password")
     token = create_access_token({"sub": user["username"], "role": user["role"]})
     return Token(
         access_token=token,
@@ -54,27 +142,22 @@ def login(request: LoginRequest):
     )
 
 
-@app.get("/auth/me")
-def get_me(current_user: dict = Depends(get_current_user)):
-    return current_user
-
-
 @app.get("/api/metrics")
 def get_metrics():
-    total = len(reviews_history)
-    analysed = len([r for r in reviews_history if r.get("status") == "analysed"])
-    oversized = len([r for r in reviews_history if r.get("status") == "oversized"])
-    return {
-        "total_prs": total or 4,
-        "analysed": analysed or 3,
-        "oversized": oversized or 1,
-        "bugs_detected": sum(r.get("bugs", 0) for r in reviews_history) or 10
-    }
+    try:
+        return db_get_metrics()
+    except Exception as e:
+        logger.error(f"DB metrics error: {e}")
+        return {"total_prs": 0, "analysed": 0, "oversized": 0, "bugs_detected": 0}
 
 
 @app.get("/api/reviews")
 def get_reviews():
-    return {"reviews": reviews_history}
+    try:
+        return {"reviews": get_all_reviews()}
+    except Exception as e:
+        logger.error(f"DB reviews error: {e}")
+        return {"reviews": []}
 
 
 @app.get("/api/repos")
@@ -134,7 +217,6 @@ async def get_pulls(owner: str, repo: str):
 
 @app.post("/api/trigger/{owner}/{repo}/{pr_number}")
 async def trigger_review(owner: str, repo: str, pr_number: int):
-    """Déclenchement manuel d'une review depuis le dashboard."""
     from app.webhook import handler
     import asyncio
 
