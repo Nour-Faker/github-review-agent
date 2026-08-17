@@ -1,4 +1,4 @@
-import json
+﻿import json
 import asyncio
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -6,6 +6,8 @@ from app.security import verify_signature
 from app.diff_extractor import DiffExtractor
 from app.rate_limiter import RateLimiter
 from app.config import settings
+from app.logger import get_logger
+logger = get_logger("webhook")
 
 router = APIRouter()
 
@@ -23,12 +25,12 @@ class WebhookHandler:
 
     async def handle_webhook(self, payload: dict, event: str) -> None:
         if self.is_bot_sender(payload):
-            print("[WebhookHandler] Bot détecté — ignoré")
+            logger.info("WebhookHandler — bot détecté ignoré")
             return
 
         sender = payload.get("sender", {}).get("login", "unknown")
         if not self.limiter.check_quota(sender):
-            print(f"[WebhookHandler] Quota dépassé pour {sender}")
+            logger.warning(f"WebhookHandler — quota dépassé pour {sender}")
             return
 
         if event == "pull_request":
@@ -57,14 +59,14 @@ class WebhookHandler:
         if self.is_bot_sender(payload):
             return
 
-        print(f"[NF-9] Mention @ai-reviewer détectée sur PR #{pr_number}")
+        logger.info(f"NF-9 — mention @ai-reviewer détectée sur PR #{pr_number}")
 
         question = comment_body.replace("@ai-reviewer", "").strip()
 
         try:
             diff = await self.extractor.fetch_diff(repo, pr_number)
         except Exception as e:
-            print(f"[NF-9] Impossible de récupérer le diff : {e}")
+            logger.error(f"NF-9 — impossible de récupérer le diff: {e}")
             diff = ""
 
         if not diff or self.extractor.is_oversized(diff):
@@ -106,14 +108,14 @@ Sois concis et professionnel. Réponds en français."""
         commenter = GitHubCommenter()
         analyzer = LLMAnalyzer()
 
-        print(f"[PR #{pr_number}] Début traitement...")
+        logger.info(f"PR #{pr_number} — début traitement")
 
         save_review(pr_number=pr_number, repo=repo, status="processing", bugs=0)
 
         diff = await self.extractor.fetch_diff(repo, pr_number)
 
         if self.extractor.is_oversized(diff):
-            print(f"[PR #{pr_number}] Diff > {settings.MAX_LINES} lignes — refusé")
+            logger.warning(f"PR #{pr_number} — diff > {settings.MAX_LINES} lignes refusé")
             update_review(pr_number=pr_number, repo=repo, status="oversized", bugs=0)
             await commenter.post_single_comment(
                 body=f"🤖 **GitHub Review Agent**\n\n⚠️ Cette PR dépasse la limite de **{settings.MAX_LINES} lignes**.",
@@ -123,7 +125,8 @@ Sois concis et professionnel. Réponds en français."""
             return
 
         hunks = self.extractor.parse_hunks(diff)
-        print(f"[PR #{pr_number}] {len(hunks)} fichiers extraits")
+        logger.info(f"PR #{pr_number} — {len(hunks)} fichiers extraits")
+
 
         if not hunks:
             update_review(pr_number=pr_number, repo=repo, status="analysed", bugs=0)
@@ -139,7 +142,7 @@ Sois concis et professionnel. Réponds en français."""
         for hunk in hunks:
             self.limiter.check_and_wait_retry()
             result = analyzer.analyze_hunk(hunk)
-            print(f"  -> {hunk.file} : analysé (valide={result.is_valid})")
+            logger.info(f"  -> {hunk.file} analysé (valide={result.is_valid})")
             results.append((hunk, result))
             if result.is_valid:
                 total_bugs += 1
@@ -152,7 +155,7 @@ Sois concis et professionnel. Réponds en français."""
         )
 
         update_review(pr_number=pr_number, repo=repo, status="analysed", bugs=total_bugs)
-        print(f"[PR #{pr_number}] Traitement terminé ✅")
+        logger.info(f"PR #{pr_number} — traitement terminé")
 
 
 handler = WebhookHandler()

@@ -4,6 +4,8 @@ from app.config import settings
 from app.diff_extractor import DiffHunk
 from app.rate_limiter import RateLimiter
 import time
+from app.logger import get_logger
+logger = get_logger("llm_analyzer")
 
 @dataclass
 class AnalysisResult:
@@ -39,7 +41,7 @@ Reponds en francais, de facon concise.'''
         try:
             return self._call_with_retry(prompt)
         except Exception as e:
-            print(f"[LLMAnalyzer] Erreur {hunk.file}: {e}")
+            logger.error(f"LLMAnalyzer — erreur {hunk.file}: {e}")
             return AnalysisResult(comment=f"Erreur analyse {hunk.file}.", is_valid=False)
 
     def _call_with_retry(self, prompt: str, max_retries: int = 3) -> AnalysisResult:
@@ -66,8 +68,8 @@ Reponds en francais, de facon concise.'''
         ]
         try:
             content = self._create_completion(messages, 500)
-            print(f"[LLMAnalyzer] content: {repr(content)}")
+            logger.info(f"LLMAnalyzer — content: {repr(content)}")
             return content if content.strip() else "Aucun probleme detecte."
         except Exception as e:
-            print(f"[LLMAnalyzer] erreur: {e}")
+            logger.error(f"LLMAnalyzer — erreur: {e}")
             return f"Erreur analyse : {str(e)}"

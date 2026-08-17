@@ -2,6 +2,8 @@ import httpx
 from app.config import settings
 from app.llm_analyzer import AnalysisResult
 from app.diff_extractor import DiffHunk
+from app.logger import get_logger
+logger = get_logger("commenter")
 
 
 class CommentValidator:
@@ -55,7 +57,8 @@ class GitHubCommenter:
 
         for hunk, result in results:
             if not self.validator.validate(result):
-                print(f"[CommentValidator] Commentaire invalide sur {hunk.file} → ignoré")
+                logger.warning(f"CommentValidator — commentaire invalide sur {hunk.file} ignoré")
+
                 continue
 
             if hunk.position and hunk.position > 0:
@@ -88,9 +91,11 @@ class GitHubCommenter:
                 )
 
             if response.status_code in [200, 201]:
-                print(f"[GitHubCommenter] Review publiée — {len(comments)} commentaires inline")
+                logger.info(f"GitHubCommenter — review publiée {len(comments)} commentaires inline")
+
             else:
-                print(f"[GitHubCommenter] Erreur review {response.status_code}: {response.text}")
+                logger.error(f"GitHubCommenter — erreur review {response.status_code}: {response.text}")
+
                 # Si la review inline échoue, on poste en fallback global
                 fallback_comments = [c["body"] for c in comments] + fallback_comments
 
@@ -131,6 +136,7 @@ class GitHubCommenter:
             )
 
         if response.status_code == 201:
-            print(f"[GitHubCommenter] Commentaire global posté sur PR #{pr_id}")
+            logger.info(f"GitHubCommenter — commentaire global posté sur PR #{pr_id}")
+
         else:
-            print(f"[GitHubCommenter] Erreur commentaire {response.status_code}: {response.text}")
+            logger.error(f"GitHubCommenter — erreur commentaire {response.status_code}: {response.text}")

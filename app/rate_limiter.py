@@ -1,5 +1,7 @@
 import time
 from collections import defaultdict
+from app.logger import get_logger
+logger = get_logger("rate_limiter")
 
 class RateLimiter:
     """RateLimiter — diagramme Classes."""
@@ -26,5 +28,5 @@ class RateLimiter:
 
     def check_and_wait_retry(self) -> None:
         """Attend avant de retry si quota LLM dépassé — NF-13."""
-        print("[RateLimiter] Attente avant retry LLM...")
+        logger.warning("RateLimiter — attente avant retry LLM")
         time.sleep(2)

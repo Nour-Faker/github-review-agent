@@ -2,6 +2,8 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
+from app.logger import get_logger
+logger = get_logger("database")
 
 load_dotenv()
 
@@ -29,7 +31,7 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
-    print("[DB] Table reviews prête")
+    logger.info("DB — table reviews prête")
 
 
 def save_review(pr_number: int, repo: str, status: str = "processing", bugs: int = 0):
