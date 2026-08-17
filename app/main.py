@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.auth import Token, LoginRequest, USERS, verify_password, create_access_token
@@ -120,7 +120,8 @@ async def health():
 
 
 @app.post("/auth/login", response_model=Token)
-def login(request: LoginRequest):
+@limiter.limit("5/minute")
+def login(request: Request, body: LoginRequest):
     user = USERS.get(request.username)
     if not user or not verify_password(request.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
@@ -133,8 +134,10 @@ def login(request: LoginRequest):
     )
 
 
+# Route metrics — 60/minute
 @app.get("/api/metrics")
-def get_metrics():
+@limiter.limit("60/minute")
+def get_metrics(request: Request):
     try:
         return db_get_metrics()
     except Exception as e:
@@ -142,8 +145,10 @@ def get_metrics():
         return {"total_prs": 0, "analysed": 0, "oversized": 0, "bugs_detected": 0}
 
 
+# Route reviews — 60/minute  
 @app.get("/api/reviews")
-def get_reviews():
+@limiter.limit("60/minute")
+def get_reviews(request: Request):
     try:
         return {"reviews": get_all_reviews()}
     except Exception as e:
@@ -151,8 +156,10 @@ def get_reviews():
         return {"reviews": []}
 
 
+# Route repos — 30/minute (appels GitHub API)
 @app.get("/api/repos")
-async def get_repos():
+@limiter.limit("30/minute")
+async def get_repos(request: Request):
     token = os.getenv("GITHUB_TOKEN")
     async with httpx.AsyncClient() as client:
         response = await client.get(
@@ -177,8 +184,10 @@ async def get_repos():
     }
 
 
+# Route pulls — 30/minute
 @app.get("/api/repos/{owner}/{repo}/pulls")
-async def get_pulls(owner: str, repo: str):
+@limiter.limit("30/minute")
+async def get_pulls(request: Request, owner: str, repo: str):
     token = os.getenv("GITHUB_TOKEN")
     async with httpx.AsyncClient() as client:
         response = await client.get(
