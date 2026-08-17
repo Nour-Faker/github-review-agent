@@ -137,15 +137,18 @@ Sois concis et professionnel. Réponds en français."""
             )
             return
 
-        results = []
-        total_bugs = 0
-        for hunk in hunks:
-            self.limiter.check_and_wait_retry()
-            result = analyzer.analyze_hunk(hunk)
+        # APRÈS — parallèle
+        import asyncio
+
+        async def analyze_one(hunk):
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, analyzer.analyze_hunk, hunk)
             logger.info(f"  -> {hunk.file} analysé (valide={result.is_valid})")
-            results.append((hunk, result))
-            if result.is_valid:
-                total_bugs += 1
+            return (hunk, result)
+
+        raw_results = await asyncio.gather(*[analyze_one(hunk) for hunk in hunks])
+        results = list(raw_results)
+        total_bugs = sum(1 for _, r in results if r.is_valid)
 
         await commenter.post_review(
             results=results,
