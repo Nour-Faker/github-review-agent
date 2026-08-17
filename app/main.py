@@ -90,16 +90,7 @@ def root():
         return FileResponse(str(index))
     return {"status": "ok", "api": "github-review-agent"}
 
-# React router fallback — toutes les routes inconnues servent index.html
-@app.get("/{full_path:path}")
-def spa_fallback(full_path: str):
-    # Ne pas interférer avec les routes API et webhook
-    if full_path.startswith(("api/", "auth/", "webhook", "health", "docs", "openapi")):
-        raise HTTPException(status_code=404)
-    index = STATIC_DIR / "index.html"
-    if index.exists():
-        return FileResponse(str(index))
-    raise HTTPException(status_code=404)
+
 
 
 @app.get("/health")
