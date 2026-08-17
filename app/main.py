@@ -243,3 +243,46 @@ async def trigger_review(owner: str, repo: str, pr_number: int):
 
     asyncio.create_task(handler.process_pr(repo_full, pr_number, commit_sha))
     return {"status": "triggered", "pr": pr_number, "repo": repo_full}
+
+@app.post("/api/summarize/{owner}/{repo}/{pr_number}")
+@limiter.limit("10/minute")
+async def summarize_pr(request: Request, owner: str, repo: str, pr_number: int):
+    """NF-28 — Résumé automatique de PR en langage naturel."""
+    from app.diff_extractor import DiffExtractor
+    from app.llm_analyzer import LLMAnalyzer
+
+    extractor = DiffExtractor()
+    analyzer = LLMAnalyzer()
+
+    try:
+        diff = await extractor.fetch_diff(f"{owner}/{repo}", pr_number)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Impossible de récupérer le diff: {e}")
+
+    if extractor.is_oversized(diff):
+        raise HTTPException(status_code=413, detail="PR trop grande pour être résumée.")
+
+    hunks = extractor.parse_hunks(diff)
+    if not hunks:
+        return {"summary": "Aucune modification détectée dans cette PR."}
+
+    # Construit un contexte global
+    context = f"Voici les modifications de la PR #{pr_number} sur {owner}/{repo}:\n\n"
+    for hunk in hunks[:10]:  # max 10 fichiers
+        context += f"### {hunk.file}\n{hunk.content[:500]}\n\n"
+
+    context += """
+Génère un résumé structuré en français avec :
+1. **Objectif** — ce que fait cette PR en une phrase
+2. **Fichiers modifiés** — liste des fichiers clés
+3. **Points positifs** — bonnes pratiques observées
+4. **Risques** — bugs potentiels ou points d'attention
+5. **Verdict** — APPROUVER / DEMANDER DES MODIFICATIONS
+"""
+
+    summary = analyzer.analyze(context)
+    return {
+        "pr": f"{owner}/{repo}#{pr_number}",
+        "files_analysed": len(hunks),
+        "summary": summary
+    }
