@@ -160,6 +160,18 @@ Sois concis et professionnel. Réponds en français."""
         update_review(pr_number=pr_number, repo=repo, status="analysed", bugs=total_bugs)
         logger.info(f"PR #{pr_number} — traitement terminé")
 
+        # NF-27 — Broadcast WebSocket
+        try:
+            from app.main import manager
+            asyncio.create_task(manager.broadcast({
+                "event": "review_completed",
+                "pr_number": pr_number,
+                "repo": repo,
+                "bugs": total_bugs
+            }))
+        except Exception as e:
+            logger.warning(f"WebSocket broadcast failed: {e}")
+
 
 handler = WebhookHandler()
 

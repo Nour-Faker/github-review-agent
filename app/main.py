@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.auth import Token, LoginRequest, USERS, verify_password, create_access_token
@@ -14,6 +14,7 @@ import os
 import logging
 import json
 import pathlib
+from typing import List
 
 # ── Logs JSON structurés ──────────────────────────────────────────────────────
 class JSONFormatter(logging.Formatter):
@@ -58,6 +59,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# NF-27 — WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connecté — {len(self.active_connections)} clients actifs")
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+        logger.info(f"WebSocket déconnecté — {len(self.active_connections)} clients actifs")
+
+    async def broadcast(self, message: dict):
+        import json
+        dead = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(json.dumps(message))
+            except Exception:
+                dead.append(connection)
+        for d in dead:
+            self.active_connections.remove(d)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/reviews")
+async def websocket_reviews(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep-alive
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -286,3 +323,6 @@ Génère un résumé structuré en français avec :
         "files_analysed": len(hunks),
         "summary": summary
     }
+
+# Export pour webhook
+from app.main import manager as ws_manager  # utilisé par webhook.py
