@@ -1,5 +1,3 @@
-# tests/clean_code.py — no vulnerabilities
-
 import os
 
 def add(a: int, b: int) -> int:

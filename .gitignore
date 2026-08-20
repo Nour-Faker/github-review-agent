@@ -4,3 +4,6 @@ __pycache__/
 .env
 *.pem
 .DS_Store
+__pycache__/
+
+static/
