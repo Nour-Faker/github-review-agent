@@ -41,7 +41,9 @@ class DiffExtractor:
 
     def is_oversized(self, diff: str) -> bool:
         """Retourne True si le diff dépasse MAX_LINES lignes."""
-        return len(diff.split("\n")) > self.MAX_LINES
+        from app.database import get_setting
+        max_lines = int(get_setting("max_diff_lines", "500"))
+        return len(diff.split("\n")) > max_lines
 
     def parse_hunks(self, diff: str) -> list[DiffHunk]:
         """
