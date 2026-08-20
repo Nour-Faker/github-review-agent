@@ -30,9 +30,17 @@ def test_parse_hunks_content_not_empty():
     hunks = extractor.parse_hunks(SAMPLE_DIFF)
     assert hunks[0].content.strip() != ""
 
+from unittest.mock import patch
+
 def test_is_oversized_false_for_small_diff():
     small_diff = "\n".join(["+line"] * 100)
-    assert extractor.is_oversized(small_diff) is False
+    with patch("app.diff_extractor.get_setting", return_value="500"):
+        assert extractor.is_oversized(small_diff) is False
+
+def test_is_oversized_true_for_large_diff():
+    large_diff = "\n".join(["+line"] * 600)
+    with patch("app.diff_extractor.get_setting", return_value="500"):
+        assert extractor.is_oversized(large_diff) is True
 
 def test_is_oversized_true_for_large_diff():
     large_diff = "\n".join(["+line"] * 600)
