@@ -25,7 +25,7 @@ def make_signature(payload: bytes, secret: str) -> str:
 PING_PAYLOAD = json.dumps({"zen": "Keep it logically awesome."}).encode()
 
 def test_health_returns_ok():
-    with patch('app.main.db_get_metrics', return_value={"total_prs": 0, "analysed": 0, "oversized": 0, "bugs_detected": 0}):
+    with patch('app.database.get_metrics', return_value={"total_prs": 0, "analysed": 0, "oversized": 0, "bugs_detected": 0}):
         response = client.get("/health")
     assert response.status_code == 200
     assert "status" in response.json()
@@ -43,13 +43,14 @@ def test_webhook_ping_invalid_signature():
     assert response.status_code == 401
 
 def test_metrics_endpoint():
-    with patch('app.main.db_get_metrics', return_value={"total_prs": 0, "analysed": 0, "oversized": 0, "bugs_detected": 0}):
+    with patch('app.routers.api.db_get_metrics', 
+               return_value={"total_prs": 0, "analysed": 0, "oversized": 0, "bugs_detected": 0}):
         response = client.get("/api/metrics")
     assert response.status_code == 200
     assert "total_prs" in response.json()
 
 def test_reviews_endpoint():
-    with patch('app.main.get_all_reviews', return_value=[]):
+    with patch('app.routers.api.get_all_reviews', return_value=[]):
         response = client.get("/api/reviews")
     assert response.status_code == 200
     assert "reviews" in response.json()
