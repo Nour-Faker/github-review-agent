@@ -1,9 +1,10 @@
-﻿from dataclasses import dataclass
+﻿import json
+import time
+from dataclasses import dataclass
 from app.config import settings
 from app.diff_extractor import DiffHunk
 from app.rate_limiter import RateLimiter
 from app.logger import get_logger
-import time
 
 logger = get_logger("llm_analyzer")
 
@@ -11,9 +12,11 @@ logger = get_logger("llm_analyzer")
 class AnalysisResult:
     comment: str
     is_valid: bool
+    severity: str = "info"
+    category: str = "style"
+    confidence: float = 0.5
 
 def _build_client():
-    """Factory — retourne le bon client selon LLM_PROVIDER."""
     if settings.LLM_PROVIDER == "openai":
         from openai import OpenAI
         logger.info("LLMAnalyzer — fournisseur: OpenAI")
@@ -42,13 +45,27 @@ class LLMAnalyzer:
         return response.choices[0].message.content or ""
 
     def analyze_hunk(self, hunk: DiffHunk) -> AnalysisResult:
-        prompt = f"""Tu es un expert en revue de code.
-Analyse ce bloc de code modifié et identifie les bugs, problèmes de sécurité, mauvaises pratiques.
+        prompt = f"""Tu es un expert en revue de code. Analyse ce bloc de code et retourne UNIQUEMENT un objet JSON, sans markdown, sans explication.
+
+Format JSON attendu :
+{{
+  "comment": "Explication claire du problème en français",
+  "severity": "critical|warning|info",
+  "category": "bug|security|performance|style",
+  "confidence": 0.0
+}}
+
+Règles de sévérité :
+- critical : bug, faille de sécurité, exception non gérée, crash potentiel
+- warning : anti-pattern, risque aux limites, mauvaise pratique fréquente
+- info : style, nommage, refactoring mineur
+
+Si aucun problème : {{"comment": "Aucun problème détecté.", "severity": "info", "category": "style", "confidence": 1.0}}
+
 Fichier : {hunk.file}
 Lignes : {hunk.lines}
 Modifications :
-{hunk.content}
-Réponds en français, de façon concise."""
+{hunk.content}"""
         try:
             return self._call_with_retry(prompt)
         except Exception as e:
@@ -57,20 +74,38 @@ Réponds en français, de façon concise."""
 
     def _call_with_retry(self, prompt: str, max_retries: int = 3) -> AnalysisResult:
         messages = [
-            {"role": "system", "content": "Tu es un expert en revue de code. Réponds en français."},
+            {"role": "system", "content": "Tu es un expert en revue de code. Réponds UNIQUEMENT en JSON valide, sans markdown."},
             {"role": "user", "content": prompt}
         ]
         for attempt in range(max_retries):
             try:
-                comment = self._create_completion(messages, 1000)
-                return AnalysisResult(comment=comment, is_valid=True)
+                raw = self._create_completion(messages, 1000)
+                try:
+                    data = json.loads(raw)
+                    severity = data.get("severity", "info")
+                    return AnalysisResult(
+                        comment=data.get("comment", "Aucun problème détecté."),
+                        severity=severity,
+                        category=data.get("category", "style"),
+                        confidence=float(data.get("confidence", 0.5)),
+                        is_valid=severity in ("critical", "warning")
+                    )
+                except json.JSONDecodeError:
+                    logger.warning(f"LLMAnalyzer — JSON invalide, fallback texte brut")
+                    return AnalysisResult(
+                        comment=raw,
+                        severity="info",
+                        category="style",
+                        confidence=0.3,
+                        is_valid=False
+                    )
             except Exception as e:
                 if "rate_limit" in str(e):
                     self.limiter.check_and_wait_retry()
                     time.sleep(2 ** attempt)
                 else:
                     raise e
-        return AnalysisResult(comment="Analyse impossible.", is_valid=False)
+        return AnalysisResult(comment="Analyse impossible.", is_valid=False, severity="info")
 
     def analyze(self, context: str) -> str:
         messages = [

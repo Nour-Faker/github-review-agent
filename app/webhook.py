@@ -1,4 +1,5 @@
-﻿import json
+﻿# -*- coding: utf-8 -*-
+import json
 import asyncio
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -7,8 +8,8 @@ from app.diff_extractor import DiffExtractor
 from app.rate_limiter import RateLimiter
 from app.config import settings
 from app.logger import get_logger
-logger = get_logger("webhook")
 
+logger = get_logger("webhook")
 router = APIRouter()
 
 
@@ -25,12 +26,12 @@ class WebhookHandler:
 
     async def handle_webhook(self, payload: dict, event: str) -> None:
         if self.is_bot_sender(payload):
-            logger.info("WebhookHandler — bot détecté ignoré")
+            logger.info("WebhookHandler - bot detecte ignore")
             return
 
         sender = payload.get("sender", {}).get("login", "unknown")
         if not self.limiter.check_quota(sender):
-            logger.warning(f"WebhookHandler — quota dépassé pour {sender}")
+            logger.info("WebhookHandler - quota depasse ignore")
             return
 
         if event == "pull_request":
@@ -59,14 +60,14 @@ class WebhookHandler:
         if self.is_bot_sender(payload):
             return
 
-        logger.info(f"NF-9 — mention @ai-reviewer détectée sur PR #{pr_number}")
+        logger.info(f"NF-9 - mention @ai-reviewer detectee sur PR #{pr_number}")
 
         question = comment_body.replace("@ai-reviewer", "").strip()
 
         try:
             diff = await self.extractor.fetch_diff(repo, pr_number)
         except Exception as e:
-            logger.error(f"NF-9 — impossible de récupérer le diff: {e}")
+            logger.error(f"NF-9 - impossible de recuperer le diff: {e}")
             diff = ""
 
         if not diff or self.extractor.is_oversized(diff):
@@ -76,7 +77,7 @@ class WebhookHandler:
 
         context = f"""Tu es un expert en revue de code.
 
-Un développeur pose cette question sur la PR #{pr_number} :
+Un developpeur pose cette question sur la PR #{pr_number} :
 "{question}"
 
 Voici le diff de la PR :
@@ -84,14 +85,14 @@ Voici le diff de la PR :
 {diff_context}
 ---
 
-Réponds directement à la question en te basant sur le code.
-Sois concis et professionnel. Réponds en français."""
+Reponds directement a la question en te basant sur le code.
+Sois concis et professionnel. Reponds en francais."""
 
         analyzer = LLMAnalyzer()
         response = analyzer.analyze(context)
 
         if not response or not response.strip():
-            response = "Analyse effectuée — aucun problème critique détecté."
+            response = "Analyse effectuee - aucun probleme critique detecte."
 
         commenter = GitHubCommenter()
         await commenter.post_single_comment(
@@ -108,47 +109,46 @@ Sois concis et professionnel. Réponds en français."""
         commenter = GitHubCommenter()
         analyzer = LLMAnalyzer()
 
-        logger.info(f"PR #{pr_number} — début traitement")
+        logger.info(f"PR #{pr_number} - debut traitement")
 
         save_review(pr_number=pr_number, repo=repo, status="processing", bugs=0)
 
         diff = await self.extractor.fetch_diff(repo, pr_number)
 
         if self.extractor.is_oversized(diff):
-            logger.warning(f"PR #{pr_number} — diff > {settings.MAX_LINES} lignes refusé")
+            logger.warning(f"PR #{pr_number} - diff > {settings.MAX_LINES} lignes refuse")
             update_review(pr_number=pr_number, repo=repo, status="oversized", bugs=0)
             await commenter.post_single_comment(
-                body=f"🤖 **GitHub Review Agent**\n\n⚠️ Cette PR dépasse la limite de **{settings.MAX_LINES} lignes**.",
+                body=f"🤖 **GitHub Review Agent**\n\n⚠️ Cette PR depasse la limite de **{settings.MAX_LINES} lignes**.",
                 pr_id=str(pr_number),
                 repo=repo
             )
             return
 
         hunks = self.extractor.parse_hunks(diff)
-        logger.info(f"PR #{pr_number} — {len(hunks)} fichiers extraits")
-
+        logger.info(f"PR #{pr_number} - {len(hunks)} fichiers extraits")
 
         if not hunks:
             update_review(pr_number=pr_number, repo=repo, status="analysed", bugs=0)
             await commenter.post_single_comment(
-                body="🤖 **GitHub Review Agent**\n\nAucune modification détectée.",
+                body="🤖 **GitHub Review Agent**\n\nAucune modification detectee.",
                 pr_id=str(pr_number),
                 repo=repo
             )
             return
 
-        # APRÈS — parallèle
-        import asyncio
-
         async def analyze_one(hunk):
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, analyzer.analyze_hunk, hunk)
-            logger.info(f"  -> {hunk.file} analysé (valide={result.is_valid})")
+            logger.info(f"  -> {hunk.file} analyse (valide={result.is_valid})")
             return (hunk, result)
 
         raw_results = await asyncio.gather(*[analyze_one(hunk) for hunk in hunks])
         results = list(raw_results)
-        total_bugs = sum(1 for _, r in results if r.is_valid)
+
+        critical_count = sum(1 for _, r in results if r.severity == "critical")
+        warning_count  = sum(1 for _, r in results if r.severity == "warning")
+        total_bugs     = critical_count + warning_count
 
         await commenter.post_review(
             results=results,
@@ -157,10 +157,11 @@ Sois concis et professionnel. Réponds en français."""
             commit_sha=commit_sha
         )
 
-        update_review(pr_number=pr_number, repo=repo, status="analysed", bugs=total_bugs)
-        logger.info(f"PR #{pr_number} — traitement terminé")
+        update_review(pr_number=pr_number, repo=repo, status="analysed", bugs=total_bugs,
+                      critical_count=critical_count, warning_count=warning_count)
 
-        # NF-27 — Broadcast WebSocket
+        logger.info(f"PR #{pr_number} - traitement termine")
+
         try:
             from app.main import manager
             asyncio.create_task(manager.broadcast({
@@ -183,3 +184,4 @@ async def github_webhook(request: Request):
     event = request.headers.get("X-GitHub-Event", "")
     asyncio.create_task(handler.handle_webhook(payload, event))
     return JSONResponse(status_code=202, content={"status": "accepted"})
+
