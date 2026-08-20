@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_process_pr.py — GitHub Review Agent
 Tests for the process_pr pipeline (webhook.py lines 104-173)
 
@@ -146,7 +146,8 @@ async def test_process_pr_valid_hunks_with_bugs():
     assert len(call_kwargs["results"]) == 2
 
     # 2 hunks both flagged as bugs → total_bugs = 2
-    mock_update.assert_called_once_with(pr_number=PR_NUMBER, repo=REPO, status="analysed", bugs=2)
+    mock_update.assert_called_once_with(pr_number=PR_NUMBER, repo=REPO, status="analysed", bugs=0,
+                                        critical_count=0, warning_count=0)
 
 
 @pytest.mark.asyncio
@@ -169,7 +170,8 @@ async def test_process_pr_valid_hunks_no_bugs():
 
         await handler.process_pr(REPO, PR_NUMBER, COMMIT_SHA)
 
-    mock_update.assert_called_once_with(pr_number=PR_NUMBER, repo=REPO, status="analysed", bugs=0)
+        mock_update.assert_called_once_with(pr_number=PR_NUMBER, repo=REPO, status="analysed", bugs=0,
+                                        critical_count=0, warning_count=0)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
