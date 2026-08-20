@@ -42,9 +42,6 @@ def test_is_oversized_true_for_large_diff():
     with patch("app.diff_extractor.get_setting", return_value="500"):
         assert extractor.is_oversized(large_diff) is True
 
-def test_is_oversized_true_for_large_diff():
-    large_diff = "\n".join(["+line"] * 600)
-    assert extractor.is_oversized(large_diff) is True
 
 def test_parse_hunks_empty_diff():
     hunks = extractor.parse_hunks("")
