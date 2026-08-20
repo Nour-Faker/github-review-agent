@@ -1,114 +1,121 @@
+﻿import json
+import time
 from dataclasses import dataclass
-from openai import AzureOpenAI
 from app.config import settings
 from app.diff_extractor import DiffHunk
 from app.rate_limiter import RateLimiter
-import time
+from app.logger import get_logger
+
+logger = get_logger("llm_analyzer")
 
 @dataclass
 class AnalysisResult:
-    """AnalysisResult — diagramme Classes."""
     comment: str
     is_valid: bool
+    severity: str = "info"
+    category: str = "style"
+    confidence: float = 0.5
 
-class LLMAnalyzer:
-    """
-    LLMAnalyzer — diagramme Classes.
-    NF-6  — Analyse du code par le LLM
-    NF-13 — Dépassement de la limite de tokens du LLM
-    """
-
-    def __init__(self):
-        # Connexion Azure OpenAI
-        self.client = AzureOpenAI(
+def _build_client():
+    if settings.LLM_PROVIDER == "openai":
+        from openai import OpenAI
+        logger.info("LLMAnalyzer — fournisseur: OpenAI")
+        return OpenAI(api_key=settings.OPENAI_API_KEY), settings.OPENAI_MODEL
+    else:
+        from openai import AzureOpenAI
+        logger.info("LLMAnalyzer — fournisseur: Azure OpenAI")
+        return AzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_KEY,
             api_version="2025-01-01-preview"
-        )
-        self.deployment = settings.AZURE_OPENAI_DEPLOYMENT
+        ), settings.AZURE_OPENAI_DEPLOYMENT
+
+class LLMAnalyzer:
+    def __init__(self):
+        self.client, self.deployment = _build_client()
         self.limiter = RateLimiter()
 
+    def _create_completion(self, messages: list, max_tokens: int) -> str:
+        kwargs = {"model": self.deployment, "messages": messages}
+        if settings.LLM_PROVIDER == "azure":
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content or ""
+
     def analyze_hunk(self, hunk: DiffHunk) -> AnalysisResult:
-        """
-        NF-6 — Analyse un hunk de code via le LLM.
-        Correspond à analyze_hunk(hunk: DiffHunk) dans le diagramme Classes.
-        """
-        prompt = f"""Tu es un expert en revue de code.
-Analyse ce bloc de code modifié et identifie :
-- Les bugs potentiels
-- Les problèmes de sécurité
-- Les mauvaises pratiques
+        prompt = f"""Tu es un expert en revue de code. Analyse ce bloc de code et retourne UNIQUEMENT un objet JSON, sans markdown, sans explication.
+
+Format JSON attendu :
+{{
+  "comment": "Explication claire du problème en français",
+  "severity": "critical|warning|info",
+  "category": "bug|security|performance|style",
+  "confidence": 0.0
+}}
+
+Règles de sévérité :
+- critical : bug, faille de sécurité, exception non gérée, crash potentiel
+- warning : anti-pattern, risque aux limites, mauvaise pratique fréquente
+- info : style, nommage, refactoring mineur
+
+Si aucun problème : {{"comment": "Aucun problème détecté.", "severity": "info", "category": "style", "confidence": 1.0}}
 
 Fichier : {hunk.file}
 Lignes : {hunk.lines}
 Modifications :
-{hunk.content}
-
-Réponds en français, de façon concise et professionnelle."""
-
+{hunk.content}"""
         try:
-            # NF-13 — Retry si dépassement tokens
             return self._call_with_retry(prompt)
-
         except Exception as e:
-            print(f"[LLMAnalyzer] Erreur analyse {hunk.file}: {e}")
-            return AnalysisResult(
-                comment=f"Erreur lors de l'analyse de {hunk.file}.",
-                is_valid=False
-            )
+            logger.error(f"LLMAnalyzer — erreur {hunk.file}: {e}")
+            return AnalysisResult(comment=f"Erreur analyse {hunk.file}.", is_valid=False)
 
     def _call_with_retry(self, prompt: str, max_retries: int = 3) -> AnalysisResult:
-        """
-        NF-13 — Gestion dépassement limite tokens avec retry.
-        Correspond à check_and_wait_retry() dans RateLimiter.
-        """
+        messages = [
+            {"role": "system", "content": "Tu es un expert en revue de code. Réponds UNIQUEMENT en JSON valide, sans markdown."},
+            {"role": "user", "content": prompt}
+        ]
         for attempt in range(max_retries):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Tu es un expert en revue de code."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    max_completion_tokens=1000,
-                    
-                )
-                comment = response.choices[0].message.content
-                return AnalysisResult(comment=comment, is_valid=True)
-
+                raw = self._create_completion(messages, 1000)
+                try:
+                    data = json.loads(raw)
+                    severity = data.get("severity", "info")
+                    return AnalysisResult(
+                        comment=data.get("comment", "Aucun problème détecté."),
+                        severity=severity,
+                        category=data.get("category", "style"),
+                        confidence=float(data.get("confidence", 0.5)),
+                        is_valid=severity in ("critical", "warning")
+                    )
+                except json.JSONDecodeError:
+                    logger.warning(f"LLMAnalyzer — JSON invalide, fallback texte brut")
+                    return AnalysisResult(
+                        comment=raw,
+                        severity="info",
+                        category="style",
+                        confidence=0.3,
+                        is_valid=False
+                    )
             except Exception as e:
-                error = str(e)
-                # NF-13 — Dépassement limite tokens ou rate limit
-                if "rate_limit" in error or "tokens" in error:
-                    print(f"[LLMAnalyzer] Rate limit — retry {attempt+1}/{max_retries}")
+                if "rate_limit" in str(e):
                     self.limiter.check_and_wait_retry()
-                    time.sleep(2 ** attempt)  # Backoff exponentiel
+                    time.sleep(2 ** attempt)
                 else:
                     raise e
-
-        return AnalysisResult(
-            comment="Analyse impossible après plusieurs tentatives.",
-            is_valid=False
-        )
+        return AnalysisResult(comment="Analyse impossible.", is_valid=False, severity="info")
 
     def analyze(self, context: str) -> str:
+        messages = [
+            {"role": "system", "content": "Tu es un expert en revue de code. Réponds en français."},
+            {"role": "user", "content": context}
+        ]
         try:
-            response = self.client.chat.completions.create(
-                model=self.deployment,
-                messages=[{"role": "user", "content": context}],
-                max_completion_tokens=500
-            )
-            content = response.choices[0].message.content
-            print(f"[LLMAnalyzer] analyze() content: {repr(content)}")
-            if not content or not content.strip():
-                return "Analyse effectuée — aucun problème critique détecté dans ce code."
-            return content
+            content = self._create_completion(messages, 500)
+            logger.info(f"LLMAnalyzer — content: {repr(content)}")
+            return content if content.strip() else "Aucun problème détecté."
         except Exception as e:
-            print(f"[LLMAnalyzer] analyze() erreur: {e}")
+            logger.error(f"LLMAnalyzer — erreur: {e}")
             return f"Erreur analyse : {str(e)}"
