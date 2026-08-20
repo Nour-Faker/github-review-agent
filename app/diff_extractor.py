@@ -1,6 +1,7 @@
 import httpx
 import os
 from dataclasses import dataclass, field
+from app.database import get_setting  # add this at the top with other imports
 
 @dataclass
 class DiffHunk:
@@ -21,10 +22,8 @@ class DiffExtractor:
     """
 
     def is_oversized(self, diff: str) -> bool:
-        from app.database import get_setting
         max_lines = int(get_setting("max_diff_lines", "500"))
         return len(diff.split("\n")) > max_lines
-
     def __init__(self):
         self.token = os.getenv("GITHUB_TOKEN")
         self.headers = {
