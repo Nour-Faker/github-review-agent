@@ -26,6 +26,19 @@ def init_db():
             created_at      TIMESTAMP DEFAULT NOW()
         );
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS settings (
+        key   VARCHAR(100) PRIMARY KEY,
+        value VARCHAR(255) NOT NULL
+    );
+    """)
+
+    # Valeur par défaut si la table est vide
+    cur.execute("""
+        INSERT INTO settings (key, value)
+        VALUES ('max_diff_lines', '500')
+        ON CONFLICT (key) DO NOTHING;
+    """)
     cur.execute("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS critical_count INTEGER DEFAULT 0")
     cur.execute("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS warning_count INTEGER DEFAULT 0")
     conn.commit()
@@ -84,3 +97,24 @@ def get_metrics():
     cur.close()
     conn.close()
     return dict(row)
+
+def get_setting(key: str, default: str = None) -> str:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM settings WHERE key = %s", (key,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row["value"] if row else default
+
+def save_setting(key: str, value: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO settings (key, value)
+        VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    """, (key, value))
+    conn.commit()
+    cur.close()
+    conn.close()

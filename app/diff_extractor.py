@@ -20,7 +20,10 @@ class DiffExtractor:
     Récupère et analyse le diff d'une Pull Request via GitHub API.
     """
 
-    MAX_LINES = 500
+    def is_oversized(self, diff: str) -> bool:
+        from app.database import get_setting
+        max_lines = int(get_setting("max_diff_lines", "500"))
+        return len(diff.split("\n")) > max_lines
 
     def __init__(self):
         self.token = os.getenv("GITHUB_TOKEN")

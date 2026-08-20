@@ -124,3 +124,20 @@ Genere un resume structure en francais avec :
 """
     summary = analyzer.analyze(context)
     return {"pr": f"{owner}/{repo}#{pr_number}", "files_analysed": len(hunks), "summary": summary}
+
+from app.database import get_setting, save_setting
+from pydantic import BaseModel
+
+class SettingsPayload(BaseModel):
+    max_diff_lines: int
+
+@router.get("/settings")
+def get_settings(request: Request):
+    return {
+        "max_diff_lines": int(get_setting("max_diff_lines", "500"))
+    }
+
+@router.patch("/settings")
+def update_settings(payload: SettingsPayload, request: Request):
+    save_setting("max_diff_lines", str(payload.max_diff_lines))
+    return {"status": "saved", "max_diff_lines": payload.max_diff_lines}
