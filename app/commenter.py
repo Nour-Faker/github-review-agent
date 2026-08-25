@@ -1,41 +1,30 @@
+﻿# -*- coding: utf-8 -*-
 import httpx
 from app.config import settings
 from app.llm_analyzer import AnalysisResult
 from app.diff_extractor import DiffHunk
+from app.logger import get_logger
+
+logger = get_logger("commenter")
+
+SEVERITY_EMOJI = {
+    "critical": "🔴",
+    "warning": "🟠",
+    "info": "💡",
+}
 
 class CommentValidator:
-    """
-    CommentValidator — diagramme Classes.
-    NF-14 — Commentaires GitHub placés sur des lignes invalides.
-    Valide chaque AnalysisResult avant de le poster sur GitHub.
-    """
-
     def validate(self, result: AnalysisResult) -> bool:
-        """
-        Vérifie que le résultat est valide avant de poster.
-        Correspond à validate(result: AnalysisResult): bool dans le diagramme.
-        """
-        # Résultat invalide → ne pas poster
         if not result.is_valid:
             return False
-
-        # Commentaire vide → ne pas poster
         if not result.comment or len(result.comment.strip()) == 0:
             return False
-
-        # Commentaire trop court → probablement une erreur LLM
         if len(result.comment) < 10:
             return False
-
         return True
 
 
 class GitHubCommenter:
-    """
-    GitHubCommenter — diagramme Classes.
-    NF-8 — Publication des commentaires sur la PR.
-    """
-
     def __init__(self):
         self.headers = {
             "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
@@ -45,6 +34,11 @@ class GitHubCommenter:
         self.base_url = "https://api.github.com"
         self.validator = CommentValidator()
 
+    def _format_comment(self, hunk: DiffHunk, result: AnalysisResult) -> str:
+        emoji = SEVERITY_EMOJI.get(getattr(result, "severity", "info"), "💡")
+        category = getattr(result, "category", "style").upper()
+        return f"{emoji} **AI Review [{category}] — {hunk.file}**\n\n{result.comment}"
+
     async def post_review(
         self,
         results: list[tuple[DiffHunk, AnalysisResult]],
@@ -52,77 +46,58 @@ class GitHubCommenter:
         pr_number: int = 0,
         commit_sha: str = ""
     ) -> None:
-        """
-        NF-8 — Publie une review complète sur la PR.
-        Correspond à post_review(results: List<AnalysisResult>): void
-        dans le diagramme Classes.
-        Étape 19 du diagramme Séquence.
-        """
         comments = []
+        fallback_comments = []
 
         for hunk, result in results:
-            # NF-14 — validate() avant chaque commentaire
-            if self.validator.validate(result):
+            if not self.validator.validate(result):
+                logger.warning(f"CommentValidator - commentaire invalide sur {hunk.file} ignore")
+                continue
+
+            body = self._format_comment(hunk, result)
+
+            if hunk.position and hunk.position > 0:
                 comments.append({
                     "path": hunk.file,
-                    "position": 1,
-                    "body": f"🤖 **AI Review — {hunk.file}**\n\n{result.comment}"
+                    "position": hunk.position,
+                    "body": body
                 })
             else:
-                # NF-14 — ligne invalide → commentaire global
-                print(f"[CommentValidator] Commentaire invalide sur {hunk.file} → ignoré")
+                fallback_comments.append(body)
 
-        if not comments:
+        if comments:
+            review_body = {
+                "commit_id": commit_sha,
+                "body": "## 🤖 GitHub Review Agent\nRevue automatique generee par l'agent IA.",
+                "event": "COMMENT",
+                "comments": comments
+            }
+            url = f"{self.base_url}/repos/{repo}/pulls/{pr_number}/reviews"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=review_body)
+
+            if response.status_code in [200, 201]:
+                logger.info(f"GitHubCommenter - review publiee {len(comments)} commentaires inline")
+            else:
+                logger.error(f"GitHubCommenter - erreur review {response.status_code}: {response.text}")
+                fallback_comments = [c["body"] for c in comments] + fallback_comments
+
+        if fallback_comments:
+            body = "## 🤖 GitHub Review Agent\n\n" + "\n\n---\n\n".join(fallback_comments)
+            await self.post_single_comment(body=body, pr_id=str(pr_number), repo=repo)
+
+        if not comments and not fallback_comments:
             await self.post_single_comment(
-                body="🤖 **GitHub Review Agent**\nAucun problème détecté dans cette PR.",
+                body="🤖 **GitHub Review Agent**\n\n✅ Aucun probleme detecte dans cette PR.",
                 pr_id=str(pr_number),
                 repo=repo
             )
-            return
 
-        review_body = {
-            "commit_id": commit_sha,
-            "body": "## 🤖 GitHub Review Agent\nRevue automatique générée par GPT-4o.",
-            "event": "COMMENT",
-            "comments": comments
-        }
-
-        url = f"{self.base_url}/repos/{repo}/pulls/{pr_number}/reviews"
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers=self.headers,
-                json=review_body
-            )
-
-        if response.status_code in [200, 201]:
-            print(f"[GitHubCommenter] Review publiée — {len(comments)} commentaires")
-        else:
-            print(f"[GitHubCommenter] Erreur {response.status_code}: {response.text}")
-
-    async def post_single_comment(
-        self,
-        body: str,
-        pr_id: str,
-        repo: str = ""
-    ) -> None:
-        """
-        Post un commentaire global sur la PR.
-        Correspond à post_single_comment(body: String, pr_id: String): void
-        dans le diagramme Classes.
-        Utilisé pour : oversized, erreurs, NF-9 mentions, NF-14 lignes invalides.
-        """
+    async def post_single_comment(self, body: str, pr_id: str, repo: str = "") -> None:
         url = f"{self.base_url}/repos/{repo}/issues/{pr_id}/comments"
-
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers=self.headers,
-                json={"body": body}
-            )
-
+            response = await client.post(url, headers=self.headers, json={"body": body})
         if response.status_code == 201:
-            print(f"[GitHubCommenter] Commentaire global posté sur PR #{pr_id}")
+            logger.info(f"GitHubCommenter - commentaire global poste sur PR #{pr_id}")
         else:
-            print(f"[GitHubCommenter] Erreur {response.status_code}: {response.text}")
+            logger.error(f"GitHubCommenter - erreur commentaire {response.status_code}: {response.text}")

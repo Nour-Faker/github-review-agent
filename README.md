@@ -1,366 +1,152 @@
 # GitHub Review Agent 🤖
 
-> AI-powered automated code review agent for GitHub Pull Requests  
-> Built by **Nour Faker** — Summer Internship 2026 — Smartovate LTD
+> Agent IA de Revue de Code Automatique pour les Pull Requests GitHub
+> Développé par **Nour Faker** — Stage Été 2026 — Smartovate LTD
 
-![Status](https://img.shields.io/badge/status-production-brightgreen)
-![Python](https://img.shields.io/badge/python-3.11-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-green)
-![Azure](https://img.shields.io/badge/Azure-OpenAI-0078D4?logo=microsoft-azure)
-![License](https://img.shields.io/badge/license-MIT-blue)
+[![CI](https://github.com/Nour-Faker/github-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Nour-Faker/github-review-agent/actions)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
+[![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=flat&logo=python)](https://python.org)
+[![Azure](https://img.shields.io/badge/Azure-App%20Service-0078D4?style=flat&logo=microsoft-azure)](https://azure.microsoft.com)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?style=flat&logo=docker)](https://docker.com)
 
----
-
-## 📸 Dashboard Preview
-
-![Dashboard](docs/dashboard.png)
-![Reviews](docs/reviews.png)
-![Analytics](docs/analytics.png)
-![Settings](docs/settings.png)
-
-> Live dashboard built with React + Recharts, connected to FastAPI backend deployed on Azure.
+**Live:** http://github-review-agent-nour.azurewebsites.net
 
 ---
 
-## 📋 What It Does
+## What it does
 
-GitHub Review Agent is a production AI agent that automatically reviews Pull Requests and posts intelligent code review comments powered by GPT-5-mini via Azure OpenAI.
-
-When a developer opens or updates a PR, or mentions `@ai-reviewer` in a comment, the agent:
-
-1. Receives the GitHub event via secured webhook (HMAC-SHA256)
-2. Validates the request authenticity
-3. Extracts the code diff from the PR
-4. Sends the diff to GPT-5-mini for analysis
-5. Posts a structured review comment directly on the PR with detected bugs, security issues, and suggestions
+- Listens for GitHub webhook events (PR opened, synchronized)
+- Extracts diff hunks from the PR
+- Sends each hunk to Azure OpenAI GPT-5-mini for analysis
+- Posts inline comments with severity labels: 🔴 Critical · 🟠 Warning · 💡 Info
+- Responds to `@ai-reviewer` mentions with contextual answers
+- Tracks all reviews in PostgreSQL with critical/warning counters
+- Exposes a React dashboard with real-time metrics
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-```
-GitHub PR Event
-      │
-      ▼
-POST /webhook (FastAPI)
-      │
-      ├── security.py        → HMAC-SHA256 signature verification
-      ├── rate_limiter.py    → Token quota + retry logic
-      ├── diff_extractor.py  → Parse and extract code changes
-      ├── llm_analyzer.py    → GPT-5-mini via Azure OpenAI
-      └── commenter.py       → Post review comment on GitHub PR
-```
+GitHub Webhook → FastAPI → DiffExtractor → LLMAnalyzer (Azure OpenAI)
+↓
+GitHubCommenter ← AnalysisResult (severity + category)
+↓
+PostgreSQL (reviews table)
+↓
+React Dashboard (/api/metrics, /api/reviews)
 
-### Component Diagram
-
-```
-github-review-agent/
-├── app/
-│   ├── main.py            # FastAPI entry point — routes + CORS
-│   ├── config.py          # AppSettings — environment variables
-│   ├── security.py        # HMAC-SHA256 webhook verification
-│   ├── webhook.py         # WebhookHandler — event orchestration
-│   ├── diff_extractor.py  # NF-5 — Diff extraction and parsing
-│   ├── rate_limiter.py    # NF-13 — Rate limiting + LLM retry
-│   ├── llm_analyzer.py    # NF-6 — LLM code analysis
-│   └── commenter.py       # NF-8 — GitHub comment publisher
-├── .env                   # Secrets (never committed)
-├── .gitignore
-├── requirements.txt
-├── Dockerfile
-└── README.md
-```
 
 ---
 
-## 🚀 Quick Start
+## Stack
 
-### Prerequisites
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI, Python 3.10 |
+| Database | PostgreSQL + psycopg2 |
+| LLM | Azure OpenAI GPT-5-mini |
+| Auth | JWT (python-jose) |
+| Security | HMAC-SHA256 webhook verification |
+| Frontend | React, Recharts, Axios |
+| Deployment | Docker, Azure App Service (Sweden Central) |
+| CI | GitHub Actions (pytest, 37 tests) |
 
-- Python 3.11+
-- GitHub account with a configured GitHub App
-- Azure OpenAI access (GPT-5-mini deployment)
+---
 
-### 1. Clone the repository
+## Features
+
+| Feature | Ticket | Description |
+|---|---|---|
+| Webhook receiver | NF-3 | FastAPI + HMAC-SHA256 verification |
+| Diff extraction | NF-5 | Parse hunks via GitHub API |
+| LLM analysis | NF-6 | Azure OpenAI GPT-5-mini, structured JSON output |
+| Inline comments | NF-8 | Severity-tagged PR comments |
+| @ai-reviewer | NF-9 | Mention handler with diff context |
+| Rate limiting | NF-13 | Exponential backoff retry |
+| Bot loop prevention | NF-15 | Bot sender detection |
+| Structured output | NF-38 | ReviewComment dataclass with severity/category/confidence |
+| Split counters | NF-39 | critical_count + warning_count in DB |
+| CI pipeline | NF-42 | GitHub Actions, 37 tests |
+| Severity emoji | NF-43 | 🔴/🟠/💡 prefix on every comment |
+
+---
+
+## Local setup
 
 ```bash
-git clone https://github.com/Nour-Faker/github-review-agent.git
+git clone https://github.com/Nour-Faker/github-review-agent
 cd github-review-agent
-```
-
-### 2. Create virtual environment
-
-```bash
 python -m venv venv
-venv\Scripts\activate        # Windows
-source venv/bin/activate     # Linux/Mac
-```
-
-### 3. Install dependencies
-
-```bash
+venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 4. Configure environment variables
-
-Create a `.env` file at the root:
-
-```env
-GITHUB_TOKEN=ghp_...
-GITHUB_WEBHOOK_SECRET=your_webhook_secret
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_KEY=your_azure_openai_key
-AZURE_OPENAI_DEPLOYMENT=gpt-5-mini
-```
-
-> ⚠️ Never commit `.env` to Git. It is already excluded via `.gitignore`.
-
-### 5. Run the server
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-### 6. Verify it's running
-
-```bash
-curl http://localhost:8000/health
-# → {"status": "ok", "version": "1.0", "model": "gpt-5-mini"}
+cp .env.example .env
+uvicorn app.main:app --reload
 ```
 
 ---
 
-## 🐳 Docker
+## Environment variables
+
+| Variable | Description |
+|---|---|
+| `WEBHOOK_SECRET` | GitHub webhook secret |
+| `GITHUB_TOKEN` | GitHub Personal Access Token |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI resource endpoint |
+| `AZURE_OPENAI_KEY` | Azure OpenAI API key |
+| `AZURE_OPENAI_DEPLOYMENT` | Deployment name (e.g. gpt-5-mini) |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `ALLOWED_ORIGINS` | CORS origins (comma-separated) |
+| `JWT_SECRET` | Secret for JWT signing |
+| `LLM_PROVIDER` | `azure` or `openai` |
+
+---
+
+## API endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/webhook` | GitHub webhook receiver |
+| GET | `/health` | Health check + dependency status |
+| GET | `/api/metrics` | Total PRs, bugs, critical/warning counts |
+| GET | `/api/reviews` | Review history from DB |
+| GET | `/api/repos` | List GitHub repos |
+| POST | `/api/trigger/{owner}/{repo}/{pr}` | Manually trigger a review |
+| POST | `/api/summarize/{owner}/{repo}/{pr}` | AI summary of a PR |
+
+---
+
+## Tests
 
 ```bash
-# Build
+python -m pytest tests/ -v
+# 37 tests — DiffExtractor, webhook, process, integration
+```
+
+---
+
+## Deployment
+
+```bash
 docker build -t github-review-agent .
-
-# Run
-docker run -p 8000:8000 --env-file .env github-review-agent
+az webapp deploy --resource-group nour --name github-review-agent-nour
 ```
 
 ---
 
-## ☁️ Deployment (Azure)
+## Sprints
 
-This project is deployed on **Azure Web Apps** using the Azure CLI:
-
-```bash
-az webapp up \
-  --name github-review-agent-nour \
-  --resource-group nour \
-  --location swedencentral \
-  --runtime PYTHON:3.11
-```
-
-Set environment variables in Azure:
-
-```bash
-az webapp config appsettings set \
-  --name github-review-agent-nour \
-  --resource-group nour \
-  --settings GITHUB_TOKEN=... AZURE_OPENAI_KEY=...
-```
-
-**Production URL:**  
-`https://github-review-agent-nour.azurewebsites.net`
+| Sprint | Période | Tickets |
+|---|---|---|
+| Sprint 1 | 1–14 Juil 2026 | NF-2, NF-3 — Webhook receiver |
+| Sprint 2 | 15–28 Juil 2026 | NF-5, NF-6, NF-13 — Diff + LLM |
+| Sprint 3 | 29 Juil–11 Août 2026 | NF-8, NF-9, NF-14, NF-15 — Commenter |
+| Sprint 4 | 12–25 Août 2026 | NF-11, NF-38 à NF-45 — Deploy + quality |
 
 ---
 
-## 📡 API Endpoints
+## Author
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| `POST` | `/webhook` | Receives GitHub webhook events |
-| `GET` | `/health` | Server health check |
-| `GET` | `/api/repos` | List all GitHub repositories |
-| `GET` | `/api/repos/{owner}/{repo}/pulls` | List PRs for a repository |
-| `GET` | `/api/metrics` | Review statistics (total, analysed, bugs) |
-| `GET` | `/api/reviews` | Review history |
-| `GET` | `/docs` | Interactive API documentation (Swagger UI) |
-
----
-
-## 🔒 Security
-
-### HMAC-SHA256 Webhook Verification
-
-Every incoming webhook request is verified before processing:
-
-- GitHub signs each request with `X-Hub-Signature-256`
-- The server recomputes the signature using the shared secret
-- `hmac.compare_digest()` prevents timing attacks
-- Returns HTTP 401 if the signature is invalid
-
-```python
-# security.py
-def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
-    expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(f"sha256={expected}", signature)
-```
-
-### Bot Loop Prevention (NF-15)
-
-The agent detects its own comments to prevent infinite reply loops:
-
-```python
-# webhook.py
-if comment_author == "smartovate-review-agent[bot]":
-    return  # Ignore own comments
-```
-
-### Secrets Management
-
-- All credentials stored in `.env` (excluded from Git)
-- Production secrets stored in Azure App Settings
-- No hardcoded keys anywhere in the codebase
-
----
-
-## 🧠 How the LLM Analysis Works
-
-```python
-# llm_analyzer.py
-def analyze(self, diff: str) -> str:
-    prompt = f"""
-    You are a senior software engineer reviewing a Pull Request.
-    Analyze this code diff and identify:
-    - Security vulnerabilities
-    - Bugs and logic errors
-    - Performance issues
-    - Code quality improvements
-    
-    Code diff:
-    {diff}
-    """
-    response = self.client.chat.completions.create(
-        model=self.deployment,
-        messages=[{"role": "user", "content": prompt}],
-        max_completion_tokens=500
-    )
-    content = response.choices[0].message.content
-    if not content or not content.strip():
-        return "Analysis complete — no critical issues detected in this diff."
-    return content
-```
-
----
-
-## 📊 Features
-
-| Feature | Status | Description |
-|---------|--------|-------------|
-| Webhook receiver | ✅ | Receives `pull_request` and `issue_comment` events |
-| HMAC-SHA256 security | ✅ | Verifies every incoming request |
-| Diff extraction | ✅ | Parses GitHub unified diffs |
-| LLM code analysis | ✅ | GPT-5-mini via Azure OpenAI |
-| PR comment posting | ✅ | Posts review directly on the PR |
-| `@ai-reviewer` mention | ✅ | Trigger analysis by mentioning the bot |
-| Bot loop prevention | ✅ | Ignores its own comments |
-| Rate limiting | ✅ | Token quota + exponential retry |
-| React dashboard | ✅ | Live monitoring of reviews and metrics |
-| Azure deployment | ✅ | Deployed on Azure Web Apps |
-| Docker support | ✅ | Containerized for portability |
-
----
-
-## 🗂️ Sprint History
-
-### ✅ Sprint 1 — Backend Foundation (1–14 Jul 2026)
-
-| Ticket | Description | Status |
-|--------|-------------|--------|
-| NF-2 | GitHub App setup and webhook configuration | ✅ Done |
-| NF-3 | FastAPI server with health endpoint | ✅ Done |
-
-### ✅ Sprint 2 — Core Agent Logic (15–28 Jul 2026)
-
-| Ticket | Description | Status |
-|--------|-------------|--------|
-| NF-5 | Code diff extraction and parsing | ✅ Done |
-| NF-6 | LLM integration via Azure OpenAI | ✅ Done |
-| NF-13 | Token limit handling + LLM retry logic | ✅ Done |
-
-### ✅ Sprint 3 — Production & Dashboard (29 Jul–3 Aug 2026)
-
-| Ticket | Description | Status |
-|--------|-------------|--------|
-| NF-8 | GitHub PR comment publisher | ✅ Done |
-| NF-9 | `@ai-reviewer` mention handler | ✅ Done |
-| NF-11 | Dockerfile for containerization | ✅ Done |
-| NF-14 | Fix invalid line comment placement | ✅ Done |
-| NF-15 | Bot infinite reply loop prevention | ✅ Done |
-
----
-
-## 🛠️ Tech Stack
-
-| Technology | Version | Role |
-|------------|---------|------|
-| Python | 3.11 | Core language |
-| FastAPI | 0.111+ | REST API + webhook server |
-| Uvicorn | 0.29+ | ASGI server |
-| Azure OpenAI GPT-5-mini | — | Code analysis LLM |
-| GitHub API v3 | — | Fetch diffs + post comments |
-| httpx | — | Async HTTP client |
-| python-dotenv | 1.0+ | Environment variable management |
-| React | 18+ | Monitoring dashboard |
-| Recharts | — | Analytics charts |
-| Azure Web Apps | — | Cloud deployment |
-| Docker | — | Containerization |
-
----
-
-## 🧪 Testing the Agent
-
-### Option 1 — Trigger via PR
-
-1. Open a Pull Request in any monitored repository
-2. The agent automatically analyses the diff and posts a review comment
-
-### Option 2 — Mention the bot
-
-In any PR comment, write:
-
-```
-@ai-reviewer what are the security issues in this code?
-```
-
-The agent will respond with an AI-generated review.
-
-### Option 3 — Dashboard
-
-Open the React dashboard, select a repository, and click **Run Agent** on any PR.
-
----
-
-## 📁 Environment Variables Reference
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GITHUB_TOKEN` | ✅ | GitHub Personal Access Token |
-| `GITHUB_WEBHOOK_SECRET` | ✅ | Secret for HMAC-SHA256 verification |
-| `AZURE_OPENAI_ENDPOINT` | ✅ | Azure OpenAI resource endpoint |
-| `AZURE_OPENAI_KEY` | ✅ | Azure OpenAI API key |
-| `AZURE_OPENAI_DEPLOYMENT` | ✅ | Model deployment name (e.g. `gpt-5-mini`) |
-
----
-
-## 👩‍💻 Author
-
-**Nour Faker**  
-1st Year Computer Engineering Student — ENICarthage  
-Summer Internship 2026 — Smartovate LTD  
+**Nour Faker** — 1ère année Génie Informatique, ENICarthage
+Stage Été 2026 — Smartovate LTD
+Supervisor: M. Abdelkhalek Bakkari, CEO & Founder
 GitHub: [@Nour-Faker](https://github.com/Nour-Faker)
-
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-*GitHub Review Agent · Smartovate LTD · Nour Faker · 2026*
